@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "macul"
+version = "0.1.0"
+description = "Python queue consumer based on asyncio and redis"
+authors = ["Keda87 <adiyatmubarak@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.7"
+uvloop = "0.14.0"
+aioredis = "1.3.0"
+attrs = "19.3.0"
+
+[tool.poetry.dev-dependencies]
+pycodestyle = "^2.5.0"
+isort = "^4.3.21"
+pylint = "^2.4.4"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
