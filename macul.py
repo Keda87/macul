@@ -9,6 +9,7 @@ import time
 import uvloop
 
 from functools import wraps
+from typing import Any, Callable
 from aioredis.errors import ConnectionClosedError
 
 
@@ -21,25 +22,24 @@ logging.basicConfig(
 
 @attr.s
 class Message:
-    id = attr.ib()
     event = attr.ib()
     body = attr.ib()
 
 
 class Macul:
 
-    def __init__(self, event_name, namespace='macul'):
+    def __init__(self, event_name: str, namespace : str ='macul') -> None:
         self.redis = None
         self.namespace = namespace
         self.event_name = event_name
         self.queue_name = 'default'
 
     @property
-    def queue_task_name(self):
+    def queue_task_name(self) -> str:
         return f'{self.namespace}:{self.queue_name}:task'
 
     @property
-    def queue_fail_name(self):
+    def queue_fail_name(self) -> str:
         return f'{self.namespace}:{self.queue_name}:fail'
 
     def init_redis(self, host='127.0.0.1', port='6379', db=0, password=None):
@@ -49,20 +49,23 @@ class Macul:
             password=password,
         )
 
-    def consumer(self, queue_name=None):
+    def _parse_message(self, data: bytes) -> Message:
+        raw_message = json.loads(data.decode('utf8'))
+        return Message(event=raw_message['event'], body=raw_message['body'])
+
+    def consumer(self, queue_name: str=None) -> Callable[[Callable], None]:
+        self.queue_name = queue_name if queue_name is not None else None
         def wrapper(func):
             @wraps(func)
-            async def wrapped(*args):
-                if queue_name is not None:
-                    self.queue_name = queue_name
-                print(f'Worker {PID} is listening on "{self.queue_task_name}"')
+            async def wrapped(*args, **kwargs) -> None:
+                print(f'Worker is listening "{self.queue_task_name}" on {PID}')
                 redis_conn = await self.redis
                 while True:
                     _, data = await redis_conn.brpop(self.queue_task_name)
-                    data = json.loads(data.decode('utf8'))
+                    message = self._parse_message(data)
                     try:
-                        if data['event'] == self.event_name:
-                            asyncio.create_task(func(data))
+                        if message.event == self.event_name:
+                            asyncio.create_task(func(message.body))
                     except KeyError:
                         logging.error('invalid payload')
                     except Exception:
@@ -72,7 +75,7 @@ class Macul:
             return wrapped
         return wrapper
 
-    def executor(self, func):
+    def executor(self, func: Callable[[Any], None]) -> None:
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
         event_loop = asyncio.get_event_loop()
         try:
