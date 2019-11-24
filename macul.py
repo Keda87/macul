@@ -85,7 +85,7 @@ class Macul:
                         logging.error('invalid payload')
                     except Exception:
                         data = json.dumps(data)
-                        redis_conn.lpush(self.queue_fail_name, data)
+                        await redis_conn.lpush(self.queue_fail_name, data)
                         logging.info('Failed event moved to fail queue')
             return wrapped
         return wrapper
@@ -108,5 +108,4 @@ class Macul:
             event_loop.close()
 
     def __repr__(self):
-        print(self.__class__)
         return f'<{self.__class__.__name__}>'
