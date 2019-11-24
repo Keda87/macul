@@ -1,17 +1,15 @@
 import asyncio
-import aioredis
-import attr
-import logging
 import json
+import logging
 import os
 import sys
-import time
-import uvloop
-
 from functools import wraps
 from typing import Any, Callable
-from aioredis.errors import ConnectionClosedError
 
+import aioredis
+import attr
+import uvloop
+from aioredis.errors import ConnectionClosedError
 
 PID = os.getpid()
 logging.basicConfig(
@@ -19,6 +17,7 @@ logging.basicConfig(
     format="%(asctime)s,%(msecs)d %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+
 
 @attr.s
 class Message:
@@ -28,7 +27,7 @@ class Message:
 
 class Macul:
 
-    def __init__(self, event_name: str, namespace : str ='macul') -> None:
+    def __init__(self, event_name: str, namespace: str ='macul') -> None:
         self.redis = None
         self.namespace = namespace
         self.event_name = event_name
@@ -58,19 +57,19 @@ class Macul:
         def wrapper(func):
             @wraps(func)
             async def wrapped(*args, **kwargs) -> None:
-                print(f'Worker is listening "{self.queue_task_name}" on {PID}')
+                print(f'Worker is listening "{self.queue_task_name}" on PID: {PID}')
                 redis_conn = await self.redis
                 while True:
-                    _, data = await redis_conn.brpop(self.queue_task_name)
-                    message = self._parse_message(data)
                     try:
+                        _, data = await redis_conn.brpop(self.queue_task_name)
+                        message = self._parse_message(data)
                         if message.event == self.event_name:
                             asyncio.create_task(func(message.body))
                     except KeyError:
                         logging.error('invalid payload')
                     except Exception:
                         data = json.dumps(data)
-                        redis.lpush(self.queue_fail_name, data)
+                        redis_conn.lpush(self.queue_fail_name, data)
                         logging.info('Failed event moved to fail queue')
             return wrapped
         return wrapper
@@ -89,4 +88,5 @@ class Macul:
             event_loop.close()
 
     def __repr__(self):
+        print(self.__class__)
         return f'<{self.__class__.name}>'
