@@ -4,7 +4,6 @@ import logging
 import os
 import signal
 from functools import wraps
-from typing import Any, Callable
 
 import aioredis
 import attr
@@ -34,6 +33,11 @@ async def shutdown(signal, loop):
     loop.stop()
 
 
+def parse_message(data: bytes):
+    raw_message = json.loads(data.decode('utf8'))
+    return Message(event=raw_message['event'], body=raw_message['body'])
+
+
 @attr.s
 class Message:
     event = attr.ib()
@@ -41,68 +45,50 @@ class Message:
 
 
 class Macul:
+    __slots__ = ['jobs', 'redis', 'queue_name']
 
-    def __init__(self, event_name: str, namespace: str = 'macul') -> None:
-        self.redis = None
-        self.namespace = namespace
-        self.event_name = event_name
-        self.queue_name = 'default'
-
-    @property
-    def queue_task_name(self) -> str:
-        return f'{self.namespace}:{self.queue_name}:task'
-
-    @property
-    def queue_fail_name(self) -> str:
-        return f'{self.namespace}:{self.queue_name}:fail'
-
-    def init_redis(self, host='127.0.0.1', port='6379', db=0, password=None):
+    def __init__(self, host='127.0.0.1', port='6379', db=0, password=None):
+        self.jobs = {}
+        self.queue_name = 'macul'
         self.redis = aioredis.create_redis_pool(
             f'redis://{host}:{port}',
             db=db,
             password=password,
         )
 
-    def _parse_message(self, data: bytes) -> Message:
-        raw_message = json.loads(data.decode('utf8'))
-        return Message(event=raw_message['event'], body=raw_message['body'])
-
-    def consumer(self, queue_name: str = None) -> Callable[[Callable], None]:
-        if queue_name is not None:
-            self.queue_name = queue_name
-        def wrapper(func):
+    def consumer(self, event_name: str, queue_name: str = 'default'):
+        def decorator(func):
             @wraps(func)
-            async def wrapped(*args, **kwargs) -> None:
-                print(f'Worker is listening "{self.queue_task_name}" on PID: {PID}')
-                redis_conn = await self.redis
-                while True:
-                    try:
-                        _, data = await redis_conn.brpop(self.queue_task_name)
-                        message = self._parse_message(data)
-                        if message.event == self.event_name:
-                            asyncio.create_task(func(message.body))
-                    except KeyError:
-                        logging.error('invalid payload')
-                    except Exception:
-                        data = json.dumps(data)
-                        await redis_conn.lpush(self.queue_fail_name, data)
-                        logging.info('Failed event moved to fail queue')
-            return wrapped
-        return wrapper
+            def wrapper(*args, **kwargs):
+                self.jobs[event_name] = func
+            return wrapper()
+        return decorator
 
-    def executor(self, func: Callable[[Any], None]) -> None:
+    async def _worker_start(self):
+        print(f'Worker started on PID: {os.getpid()}')
+        redis_conn = await self.redis
+        while True:
+            _, data = await redis_conn.brpop(self.queue_name)
+            message = parse_message(data)
+            try:
+                func = self.jobs[message.event]
+                asyncio.create_task(func(message.body))
+            except KeyError:
+                logging.error(f'Unregistered event: {message.event}')
+
+    def start(self):
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
         event_loop = asyncio.get_event_loop()
 
         signals = [signal.SIGHUP, signal.SIGTERM, signal.SIGINT]
         for sign in signals:
             event_loop.add_signal_handler(
-                sign, 
+                sign,
                 lambda s=sign: asyncio.create_task(shutdown(sign, event_loop))
             )
 
         try:
-            asyncio.ensure_future(func())
+            asyncio.ensure_future(self._worker_start())
             event_loop.run_forever()
         finally:
             event_loop.close()
