@@ -8,12 +8,10 @@ but the goal of this project is to allow us to create worker as simple as possib
 
 __Producer:__
 
-You can use any programming languages as long you `LPUSH` the event using key with this pattern.
-
-_Pattern: `<namespace>:<queue_name>:task`_
+You can use any programming languages as long you `LPUSH` the event using key `macul:default:task`.
 
 ```bash
-$ LPUSH macul:registration:task '{"event": "SIGN_UP", "body": "{\"email\": "\john.doe@gmail.com"\, \"password\": \"test123$\"}"}'
+$ LPUSH macul:default:task '{"event": "SIGN_UP", "body": "{\"email\": "\john.doe@gmail.com"\, \"password\": \"test123$\"}"}'
 ```
 
 Also the message is must have these two keys `event` with string value and `body` is JSON serializable or any primitive data type.
@@ -23,19 +21,23 @@ __Consumer:__
 from macul import Macul
 
 
-macul_app = Macul(event_name='SIGN_UP')  # You can custom the namespace using second optional argument.
-macul_app.init_redis()                   # You can pass argument for the host, port, db and password.
+app = Macul()
 
 
-@macul_app.consumer(queue_name='registration')  # queue_name = 'default' if not specified
-async def worker_sign_up(data):
-    # Process and do whatever you want with this data.
-    pass
+@app.consumer(event_name='testing')
+async def worker_testing(message):
+    print('Consumed by: testing')
+    print(message)
+
+
+@app.consumer(event_name='notification')
+async def worker_notification(message):
+    print('Consumed by: notification')
+    print(message)
 
 
 if __name__ == '__main__':
-    macul_app.executor(worker_sign_up)
-
+    app.start()
 ```
 
 ##### TODO:
