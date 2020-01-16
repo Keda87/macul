@@ -19,7 +19,6 @@ logging.basicConfig(
 
 async def shutdown(signal, loop):
     logging.info(f'Received exit signal {signal.name}...')
-    logging.info('Closing redis connections')
     tasks = [
         task
         for task in asyncio.all_tasks()
@@ -49,14 +48,14 @@ class Macul:
 
     def __init__(self, host='127.0.0.1', port='6379', db=0, password=None):
         self.jobs = {}
-        self.queue_name = 'macul'
+        self.queue_name = 'macul:default:task'
         self.redis = aioredis.create_redis_pool(
             f'redis://{host}:{port}',
             db=db,
             password=password,
         )
 
-    def consumer(self, event_name: str, queue_name: str = 'default'):
+    def consumer(self, event_name: str):
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -65,16 +64,18 @@ class Macul:
         return decorator
 
     async def _worker_start(self):
-        print(f'Worker started on PID: {os.getpid()}')
-        redis_conn = await self.redis
-        while True:
-            _, data = await redis_conn.brpop(self.queue_name)
-            message = parse_message(data)
-            try:
-                func = self.jobs[message.event]
-                asyncio.create_task(func(message.body))
-            except KeyError:
-                logging.error(f'Unregistered event: {message.event}')
+        try:
+            redis_conn = await self.redis
+            while True:
+                _, data = await redis_conn.brpop(self.queue_name)
+                message = parse_message(data)
+                try:
+                    func = self.jobs[message.event]
+                    asyncio.create_task(func(message.body))
+                except KeyError:
+                    logging.error(f'Unregistered event: {message.event}')
+        except ConnectionError:
+            logging.error('Redis is not connected.')
 
     def start(self):
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
